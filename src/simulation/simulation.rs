@@ -2,18 +2,21 @@ use thiserror::Error;
 
 use super::{
     event::{Event, EventQueue},
+    state::State,
     time::Time,
 };
 
 /// An entire simulation, with entities and event queue
-pub struct Simulation<E: Event> {
+pub struct Simulation<E: Event<State = S>, S: State> {
     /// The current time of the simulation
     time: Time,
     /// The queue of events due to happen
     events: EventQueue<E>,
+    /// The state of the simulation
+    state: S,
 }
 
-impl<E: Event> Simulation<E> {
+impl<E: Event<State = S>, S: State> Simulation<E, S> {
     /// Time elapsed from the start of the simulation
     pub const fn time(&self) -> Time {
         self.time
@@ -54,12 +57,20 @@ impl<E: Event> Simulation<E> {
     /// Run the simulation while a condition is met
     pub fn run_while(
         &mut self,
-        condition: fn(&Simulation<E>) -> bool,
+        condition: fn(&Self) -> bool,
     ) -> Result<Time, TimedSimulationError<E>> {
         while condition(self) {
             self.step()?;
         }
         Ok(self.time())
+    }
+    /// Get the state of the simulation
+    pub const fn state(&self) -> &S {
+        &self.state
+    }
+    /// Get the mutable state of the simulation
+    pub fn state_mut(&mut self) -> &mut S {
+        &mut self.state
     }
 }
 

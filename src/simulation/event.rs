@@ -1,14 +1,15 @@
-use std::error::Error;
+use std::{error::Error, marker::PhantomData};
 
 use priq::PriorityQueue;
 
-use super::{simulation::Simulation, time::Time};
+use super::{simulation::Simulation, state::State, time::Time};
 
 pub trait Event: Sized {
+    type State: State;
     type Error: Error;
 
     /// Run the event
-    fn run(self, simulation: &mut Simulation<Self>) -> Result<(), Self::Error>;
+    fn run(self, simulation: &mut Simulation<Self, Self::State>) -> Result<(), Self::Error>;
 }
 
 /// A queue of events
