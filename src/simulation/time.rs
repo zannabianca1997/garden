@@ -1,7 +1,7 @@
 use std::{
     fmt::Display,
     num::Wrapping,
-    ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign},
+    ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign},
 };
 
 /// The integer type used to save the simulation time
@@ -9,9 +9,9 @@ type TimeInt = i64;
 
 /// A time delta of the simulation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TimeDelta(Wrapping<TimeInt>);
+pub struct Time(Wrapping<TimeInt>);
 
-impl TimeDelta {
+impl Time {
     pub const ZERO: Self = Self(Wrapping(0));
     pub const EPSILON: Self = Self(Wrapping(1));
     pub const MIN: Self = Self(Wrapping::<TimeInt>::MIN);
@@ -80,71 +80,78 @@ impl TimeDelta {
 
 // Arithmetic with times
 
-impl Add for TimeDelta {
+impl Add for Time {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
         Self(self.0 + rhs.0)
     }
 }
-impl AddAssign for TimeDelta {
+impl AddAssign for Time {
     fn add_assign(&mut self, rhs: Self) {
         self.0 += rhs.0
     }
 }
-impl Sub for TimeDelta {
+impl Sub for Time {
     type Output = Self;
 
     fn sub(self, rhs: Self) -> Self::Output {
         Self(self.0 - rhs.0)
     }
 }
-impl SubAssign for TimeDelta {
+impl SubAssign for Time {
     fn sub_assign(&mut self, rhs: Self) {
         self.0 -= rhs.0
     }
 }
+impl Neg for Time {
+    type Output = Self;
 
-impl<IntT: Into<TimeInt>> Mul<IntT> for TimeDelta {
+    fn neg(self) -> Self::Output {
+        Self(-self.0)
+    }
+}
+
+impl<IntT: Into<TimeInt>> Mul<IntT> for Time {
     type Output = Self;
 
     fn mul(self, rhs: IntT) -> Self::Output {
         Self(self.0 * Wrapping(rhs.into()))
     }
 }
-impl<IntT: Into<TimeInt>> MulAssign<IntT> for TimeDelta {
+impl<IntT: Into<TimeInt>> MulAssign<IntT> for Time {
     fn mul_assign(&mut self, rhs: IntT) {
         self.0 *= rhs.into()
     }
 }
 
-impl Div for TimeDelta {
+impl Div for Time {
     type Output = TimeInt;
 
     fn div(self, rhs: Self) -> Self::Output {
         (self.0 / rhs.0).0
     }
 }
-impl<IntT: Into<TimeInt>> Div<IntT> for TimeDelta {
-    type Output = TimeDelta;
+impl<IntT: Into<TimeInt>> Div<IntT> for Time {
+    type Output = Time;
 
     fn div(self, rhs: IntT) -> Self::Output {
-        TimeDelta(self.0 / Wrapping(rhs.into()))
+        Time(self.0 / Wrapping(rhs.into()))
     }
 }
-impl<IntT: Into<TimeInt>> DivAssign<IntT> for TimeDelta {
+impl<IntT: Into<TimeInt>> DivAssign<IntT> for Time {
     fn div_assign(&mut self, rhs: IntT) {
         self.0 = (*self / rhs).0;
     }
 }
-impl Rem for TimeDelta {
+impl Rem for Time {
     type Output = Self;
 
     fn rem(self, rhs: Self) -> Self::Output {
         Self(self.0 % rhs.0)
     }
 }
-impl RemAssign for TimeDelta {
+impl RemAssign for Time {
     fn rem_assign(&mut self, rhs: Self) {
         self.0 %= rhs.0
     }
@@ -152,7 +159,7 @@ impl RemAssign for TimeDelta {
 
 // Display
 
-impl Display for TimeDelta {
+impl Display for Time {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let (years, t): (TimeInt, _) = self.split_years();
         let (months, t): (TimeInt, _) = t.split_months();
@@ -179,9 +186,9 @@ impl Display for TimeDelta {
         }
 
         match (seconds, sub_second, written_something) {
-            (0, TimeDelta::ZERO, false) => write!(f, "{}{}s", f.fill(), 0)?,
-            (0, TimeDelta::ZERO, true) => (), // do not add unuseful 0s
-            (_, TimeDelta::ZERO, _) => {
+            (0, Time::ZERO, false) => write!(f, "{}{}s", f.fill(), 0)?,
+            (0, Time::ZERO, true) => (), // do not add unuseful 0s
+            (_, Time::ZERO, _) => {
                 if written_something {
                     write!(f, "{}", f.fill())?;
                 }
