@@ -12,7 +12,7 @@ mod time {
     use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 
     /// A point in the time of the simulation
-    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub enum Time {
         NegativeInfinity,
         Finite(TimeDelta),
@@ -23,6 +23,13 @@ mod time {
         const ZERO: Self = Time::Finite(TimeDelta::ZERO);
         const MIN: Self = Time::NegativeInfinity;
         const MAX: Self = Time::PositiveInfinity;
+
+        pub fn difference(&self, from: &Self) -> Option<TimeDelta> {
+            match (self, from) {
+                (Time::Finite(s), Time::Finite(f)) => Some(*s - *f),
+                _ => None,
+            }
+        }
 
         #[must_use]
         pub fn as_finite(&self) -> Option<&TimeDelta> {
@@ -39,6 +46,30 @@ mod time {
             } else {
                 None
             }
+        }
+
+        /// Returns `true` if the time is [`Finite`].
+        ///
+        /// [`Finite`]: Time::Finite
+        #[must_use]
+        pub fn is_finite(&self) -> bool {
+            matches!(self, Self::Finite(..))
+        }
+
+        /// Returns `true` if the time is [`NegativeInfinity`].
+        ///
+        /// [`NegativeInfinity`]: Time::NegativeInfinity
+        #[must_use]
+        pub fn is_negative_infinity(&self) -> bool {
+            matches!(self, Self::NegativeInfinity)
+        }
+
+        /// Returns `true` if the time is [`PositiveInfinity`].
+        ///
+        /// [`PositiveInfinity`]: Time::PositiveInfinity
+        #[must_use]
+        pub fn is_positive_infinity(&self) -> bool {
+            matches!(self, Self::PositiveInfinity)
         }
     }
 
@@ -80,7 +111,7 @@ mod time {
     }
 
     /// A finite difference between two simulation time points
-    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct TimeDelta(i64);
 
     impl TimeDelta {
