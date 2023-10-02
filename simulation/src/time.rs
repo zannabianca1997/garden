@@ -70,6 +70,16 @@ impl Time {
     }
 }
 
+impl Display for Time {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Time::NegativeInfinity => write!(f, "-inf"),
+            Time::Finite(t) => t.fmt(f),
+            Time::PositiveInfinity => write!(f, "+inf"),
+        }
+    }
+}
+
 impl Add<TimeDelta> for Time {
     type Output = Time;
 
