@@ -110,6 +110,19 @@ impl TimeDelta {
     const ZERO: Self = TimeDelta(0);
     /// The smallest time delta
     const EPSILON: Self = TimeDelta(1);
+
+    /// The equivalent of a millisecond
+    const MILLI: Self = TimeDelta(16);
+    /// The equivalent of a second
+    const SECOND: Self = TimeDelta(16 * 1000);
+    /// The equivalent of a minute
+    const MINUTE: Self = TimeDelta(16 * 1000 * 60);
+    /// The equivalent of a hour
+    const HOUR: Self = TimeDelta(16 * 1000 * 60 * 60);
+    /// The equivalent of a day
+    const DAY: Self = TimeDelta(16 * 1000 * 60 * 60 * 24);
+    /// The equivalent of a year
+    const YEAR: Self = TimeDelta(16 * 1000 * 60 * 60 * 24 * 365);
 }
 
 impl Add for TimeDelta {
