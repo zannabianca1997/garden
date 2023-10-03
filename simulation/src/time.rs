@@ -11,11 +11,17 @@ use thiserror::Error;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Time(u64);
 
+impl Default for Time {
+    fn default() -> Self {
+        Self::ZERO
+    }
+}
+
 impl Time {
-    const ZERO: Self = Time(0);
-    const INFINITY: Self = Time(u64::MAX);
-    const MIN: Self = Time::ZERO;
-    const MAX: Self = Time::INFINITY;
+    pub const ZERO: Self = Time(0);
+    pub const INFINITY: Self = Time(u64::MAX);
+    pub const MIN: Self = Time::ZERO;
+    pub const MAX: Self = Time::INFINITY;
 
     pub fn difference(&self, from: &Self) -> Option<TimeDelta> {
         if self.is_finite() && from.is_finite() {
