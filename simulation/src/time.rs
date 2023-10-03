@@ -117,6 +117,26 @@ impl SubAssign<TimeDelta> for Time {
     }
 }
 
+impl From<TimeDelta> for Time {
+    fn from(value: TimeDelta) -> Self {
+        Self::Finite(value)
+    }
+}
+impl PartialEq<TimeDelta> for Time {
+    fn eq(&self, other: &TimeDelta) -> bool {
+        self.as_finite().is_some_and(|t| t == other)
+    }
+}
+impl PartialOrd<TimeDelta> for Time {
+    fn partial_cmp(&self, other: &TimeDelta) -> Option<std::cmp::Ordering> {
+        match self {
+            Time::NegativeInfinity => Some(std::cmp::Ordering::Less),
+            Time::Finite(t) => t.partial_cmp(other),
+            Time::PositiveInfinity => Some(std::cmp::Ordering::Greater),
+        }
+    }
+}
+
 /// A finite difference between two simulation time points
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TimeDelta(i64);
