@@ -4,7 +4,7 @@ use std::ops::{
     Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign,
 };
 
-use arbitrary::{size_hint, Arbitrary, Unstructured};
+use arbitrary::{Arbitrary, Unstructured};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
