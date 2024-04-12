@@ -1,0 +1,16 @@
+[package]
+name = "illumination"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+grid = { version = "0.13.0", features = ["serde"] }
+nalgebra = { version = "0.32.5", features = ["serde-serialize"] }
+serde = { version = "1.0.197", features = ["derive"] }
+serde_with = "3.7.0"
+sim_time = { path = "../sim_time" }
+
+[dev-dependencies]
+ciborium = "0.2.2"
+serde_json = "1.0.115"
+indent_write = "2.2.0"
