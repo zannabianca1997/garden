@@ -1,9 +1,7 @@
 use std::{
     f64::consts::PI,
     ffi::{OsStr, OsString},
-    fs::File,
     hash::{DefaultHasher, Hash, Hasher},
-    io::Write,
     num::NonZeroU32,
     path::PathBuf,
 };
@@ -11,8 +9,8 @@ use std::{
 use clap::Parser;
 use field::Field;
 use image::{GrayImage, Luma, Rgb, RgbImage};
-use nalgebra::{point, vector, Matrix3, Point, Point2, Vector2, Vector3};
-use noise::{core::value, NoiseFn, Simplex};
+use nalgebra::{point, vector, Matrix3, Point2, Vector3};
+use noise::{NoiseFn, Simplex};
 use rand::{thread_rng, Rng};
 
 #[derive(Debug, Parser, Clone)]
@@ -81,7 +79,6 @@ fn main() {
             ])
         }
     };
-    let noise = |pos: Point2<f64>| (2. * PI * pos.x).cos();
 
     // sampling the noise and generating our tessellation
     let field = Field::new_from_fun(tile_x, tile_y, res, noise);
@@ -155,7 +152,7 @@ fn main() {
 
     // Raycasted map
 
-    let camera = point![0., 0., 10.];
+    let camera = point![0., 0., 2.];
     let point_to = point![10., 0., 0.];
     let fov = 40.;
 
@@ -169,11 +166,7 @@ fn main() {
         let from_camera_to_world =
             Matrix3::from_columns(&[camera_right, camera_up, camera_direction]);
 
-        dbg!(from_camera_to_world * Vector3::x());
-        dbg!(from_camera_to_world * Vector3::y());
-        dbg!(from_camera_to_world * Vector3::z());
-
-        let caster = field.raycaster();
+        let caster = field.raycaster(Default::default());
 
         let image = RgbImage::from_fn(res_x.get(), res_y.get(), |i, j| {
             // sampling the normals
@@ -189,8 +182,7 @@ fn main() {
                 return Rgb([21, 148, 207]);
             };
 
-            /*
-            let sunny = if let Some(_) = caster.cast(hit + 0.001 * Vector3::z(), sun_pos) {
+            let sunny = if let Some(_) = caster.cast(hit + sun_pos * 0.001, sun_pos) {
                 // It's in the shade
                 0.
             } else {
@@ -200,12 +192,6 @@ fn main() {
 
             let rgb = sunny * vector![53., 115., 42.];
             Rgb([rgb.x as u8, rgb.y as u8, rgb.x as u8])
-            */
-
-            let value = (hit.z - min) / (max - min);
-            let value = (value * u8::MAX as f64) as u8;
-
-            Rgb([value; 3])
         });
 
         image

@@ -64,7 +64,7 @@ impl<T> Field<T> {
             .rem_euclid(self.data.cols() as isize) as usize;
         let d_row = row.rem_euclid(self.data.rows() as isize) as usize;
         (
-            self.from_square_coords * vector![row as f64, col as f64],
+            self.from_square_coords * vector![col as f64, row as f64],
             &self.data[(d_row, d_col)],
         )
     }
@@ -282,12 +282,29 @@ impl Field<f64> {
     }
 
     /// Precalculate values for raycasting
-    pub fn raycaster(&self) -> Raycaster {
+    pub fn raycaster(&self, RaycasterOptions { epsilon, max_dist }: RaycasterOptions) -> Raycaster {
         Raycaster {
             max_heigth: *self.max_by(f64::total_cmp),
             min_heigth: *self.min_by(f64::total_cmp),
             max_gradient: self.max_gradient(),
             field: self,
+            epsilon,
+            max_dist,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RaycasterOptions {
+    pub epsilon: f64,
+    pub max_dist: f64,
+}
+
+impl Default for RaycasterOptions {
+    fn default() -> Self {
+        Self {
+            epsilon: 1e-5,
+            max_dist: 1000.,
         }
     }
 }
@@ -295,9 +312,13 @@ impl Field<f64> {
 #[derive(Debug, Clone, Copy)]
 pub struct Raycaster<'f> {
     field: &'f Field<f64>,
+
     max_heigth: f64,
     min_heigth: f64,
     max_gradient: f64,
+
+    epsilon: f64,
+    max_dist: f64,
 }
 
 impl Raycaster<'_> {
@@ -312,8 +333,8 @@ impl Raycaster<'_> {
         }
 
         // Calculating the entering and exiting cells
-        let mut advanced = f64::min(0., f64::min(i_min, i_max));
-        let end = f64::min(f64::max(i_min, i_max), 1000.);
+        let mut advanced = f64::min(self.epsilon, f64::min(i_min, i_max));
+        let end = f64::min(f64::max(i_min, i_max), self.max_dist);
 
         // Opening of the max gradient cone
         let cone_opening = 1. / (dir.z.abs() + self.max_gradient * dir.xy().norm());
@@ -322,115 +343,69 @@ impl Raycaster<'_> {
             let current_pos = pos + dir * advanced;
 
             // checks if we hit the triangle under us. If not, return the height of the terrain under us
-            let t_height = {
-                let (trig, coords, _) = self.field.trig_data(current_pos.xy());
-                let vertices = trig.map(|idx| {
-                    let (o, h) = self.field.vertex(idx);
-                    point![o.x, o.y, *h]
-                });
 
-                print!("{} {}", current_pos.x, current_pos.y);
-                for v in vertices {
-                    print!(" {} {}", v.x, v.y);
+            let (trig, coords, _) = self.field.trig_data(current_pos.xy());
+            let vertices = trig.map(|idx| {
+                let (o, h) = self.field.vertex(idx);
+                point![o.x, o.y, *h]
+            });
+
+            // Find the plane/line intersection
+
+            if let Some(intersection) =
+                Matrix3::from_columns(&[-dir, vertices[1] - vertices[0], vertices[2] - vertices[0]])
+                    .lu()
+                    .solve(&(pos - vertices[0]))
+            {
+                // intersection exist
+                let t = intersection.x;
+                let u = intersection.y;
+                let v = intersection.z;
+
+                // check if the intersection is inside the triangle AND in the positive semi-ray
+                if t > 0. && u >= 0. && v >= 0. && u + v <= 1. {
+                    return Some(pos + t * dir);
                 }
-                println!();
+            } else {
+                // no intersection, ray is coplanar
+            }
 
-                // Find the plane/line intersection
-                let decomposed_matrix = Matrix3::from_columns(&[
-                    -dir,
-                    vertices[1] - vertices[0],
-                    vertices[2] - vertices[0],
-                ])
-                .lu();
-
-                if let Some(intersection) = decomposed_matrix.solve(&(pos - vertices[0])) {
-                    // intersection exist
-                    let t = intersection.x;
-                    let u = intersection.y;
-                    let v = intersection.z;
-
-                    // check if the intersection is inside the triangle AND in the positive semi-ray
-                    if t >= 0. && u >= 0. && v >= 0. && u + v <= 1. {
-                        return Some(pos + t * dir);
-                    }
-                } else {
-                    // no intersection, ray is coplanar
-                }
-
-                vertices[0].z * coords.x + vertices[1].z * coords.y + vertices[2].z * coords.z
-            };
+            let t_height =
+                vertices[0].z * coords.x + vertices[1].z * coords.y + vertices[2].z * coords.z;
 
             // calculate how much can the ray advance with no repercussion
-            let delta = cone_opening * (t_height - current_pos.z).abs();
-            advanced += delta.max(1e-5);
 
-            if false && delta < 1e-5 {
-                dbg!(current_pos, dir, end);
+            // First: cone of the noise
+            let mut delta = cone_opening * (t_height - current_pos.z).abs();
 
-                let (trig, coords, _) = self.field.trig_data(current_pos.xy());
-                let vertices = trig.map(|idx| {
-                    let (o, h) = self.field.vertex(idx);
-                    point![o.x, o.y, *h]
-                });
+            // Second: prism
+            for (v_1, v_2) in [
+                (vertices[0], vertices[1]),
+                (vertices[1], vertices[2]),
+                (vertices[2], vertices[0]),
+            ] {
+                let [v_1, v_2] = [v_1, v_2].map(|p| p.xy());
 
-                dbg!(trig, coords, vertices);
-
-                // Find the plane/line intersection
-                let decomposed_matrix = Matrix3::from_columns(&[
-                    -dir,
-                    vertices[1] - vertices[0],
-                    vertices[2] - vertices[0],
-                ])
-                .lu();
-
-                if let Some(intersection) = decomposed_matrix.solve(&(pos - vertices[0])) {
+                if let Some(intersection) = Matrix2::from_columns(&[-dir.xy(), v_1 - v_2])
+                    .lu()
+                    .solve(&(current_pos.xy() - v_2))
+                {
                     // intersection exist
                     let t = intersection.x;
                     let u = intersection.y;
-                    let v = intersection.z;
 
-                    dbg!(t, u, v);
-
-                    // check if the intersection is inside the triangle AND in the positive semi-ray
-                    if t >= 0. && u >= 0. && v >= 0. && u + v <= 1. {
-                        return Some(pos + t * dir);
+                    // Is the intersection in the side of the triangle?
+                    if t > 0. && u >= 0. && u <= 1. {
+                        delta = delta.max(t)
                     }
                 } else {
-                    // no intersection, ray is coplanar
+                    // no intersection, ray is parallel
                 }
             }
+
+            advanced += delta.max(self.epsilon);
         }
 
         None
     }
-}
-
-/// Bresenham's line algorithm
-fn bresenham(pos: Point2<f64>, dir: Vector2<f64>) -> impl Iterator<Item = [isize; 2]> {
-    let mut i = pos.x.div_euclid(1.) as isize;
-    let u = pos.x.rem_euclid(1.);
-    let mut j = pos.y.div_euclid(1.) as isize;
-    let v = pos.y.rem_euclid(1.);
-    // error of the pixel center from the line
-    let mut err = (0.5 - u) * dir.y - (0.5 - v) * dir.x;
-    let (d_i, mut d_err_i) = if dir.x > 0. { (1, dir.y) } else { (-1, -dir.y) };
-    let (d_j, mut d_err_j) = if dir.y > 0. { (1, -dir.x) } else { (-1, dir.x) };
-    // correcting the error to be relative to the threshold, and pre-flipping to speed up the cycle
-    err += (d_err_i + d_err_j) / 2.;
-    if d_err_i < d_err_j {
-        err = -err;
-        d_err_i = -d_err_i;
-        d_err_j = -d_err_j;
-    }
-    once([i, j]).chain(repeat(()).map(move |()| {
-        if err < 0. {
-            i += d_i;
-            err += d_err_i
-        } else {
-            j += d_j;
-            err += d_err_j
-        }
-
-        [i, j]
-    }))
 }
