@@ -1,0 +1,221 @@
+#![feature(unwrap_infallible)]
+#![feature(exit_status_error)]
+
+use std::{
+    f64::consts::PI,
+    ffi::OsString,
+    hash::{DefaultHasher, Hash, Hasher},
+    io::{Cursor, Write},
+    path::PathBuf,
+    process::Stdio,
+};
+
+use clap::{Parser, Subcommand};
+use grid::Grid;
+use illumination::{Illumination, SunSetup};
+use image::{GrayImage, Luma};
+use nalgebra::{clamp, vector};
+use noise::{NoiseFn, Perlin, Simplex};
+use rand::{thread_rng, Rng};
+use sim_time::{humanized::Humanized, Duration, Time};
+
+#[derive(Debug, Parser, Clone)]
+#[command(version, about, long_about = None)]
+struct Args {
+    #[clap(long)]
+    /// Seed for the noise
+    seed: Option<OsString>,
+
+    #[clap(long, short, default_value = "128")]
+    /// Vertical size of the map
+    rows: u32,
+    #[clap(long, short, default_value = "128")]
+    /// Orizontal size of the map
+    cols: u32,
+
+    #[clap(long, short, default_value = "10")]
+    /// Scale of the features in the map
+    scale: f64,
+
+    #[clap(long, default_value = "1d", value_parser = |s:&str| s.parse::<Humanized<Duration>>().map(Humanized::inner))]
+    /// Lenght of one day
+    day_lenght: Duration,
+    #[clap(long, default_value = "45")]
+    /// Latitude, in degrees
+    latitude: f64,
+    #[clap(long, default_value = "615.15")]
+    /// Solar constant, in W/m^2
+    solar_constant: f64,
+
+    #[clap(long, short)]
+    /// Output file for the noise map
+    noise_map: Option<PathBuf>,
+
+    #[clap(subcommand)]
+    command: Command,
+}
+
+#[derive(Debug, Clone, Subcommand)]
+enum Command {
+    /// Photograph a single illuminated frame
+    Frame {
+        #[clap(long, short, default_value = "0", value_parser = |s:&str| s.parse::<Humanized<Time>>().map(Humanized::inner))]
+        /// Time at which the calculation must be done
+        time: Time,
+        /// Output file for the illumination map
+        illuminate_map: PathBuf,
+    },
+
+    /// Generate a mp4 video of a whole day, from sunset to sunset
+    Video {
+        #[clap(long, short, default_value = "25")]
+        /// Framerate of the video
+        framerate: u8,
+
+        #[clap(long, short, default_value = "15")]
+        /// Lenght of the video in seconds
+        lenght: f64,
+
+        /// Output video
+        illuminate_video: PathBuf,
+    },
+}
+
+fn main() {
+    let Args {
+        seed,
+        rows,
+        cols,
+        scale,
+        day_lenght,
+        latitude,
+        solar_constant,
+        noise_map,
+        command,
+    } = Args::parse();
+
+    let seed = if let Some(seed) = seed {
+        let mut s = DefaultHasher::new();
+        seed.hash(&mut s);
+        (s.finish() & (u32::MAX as u64)) as u32
+    } else {
+        thread_rng().gen()
+    };
+    let noise = noise::Multiply::new(Simplex::new(seed), noise::Constant::new(scale));
+
+    let mut map = Grid::new(rows as usize, cols as usize);
+
+    for row in 0..map.rows() {
+        for col in 0..map.cols() {
+            // conversion to normalized coordinates
+            let u = col as f64 / map.cols() as f64;
+            let v = (map.rows() - 1 - row) as f64 / map.rows() as f64;
+            // conversion to toroidal 4d coordinates
+            let u = vector![(u * 2. * PI).cos(), (u * 2. * PI).sin()];
+            let v = vector![(v * 2. * PI).cos(), (v * 2. * PI).sin()];
+            // zooming of the torus to make features the right size
+            let u = u * map.cols() as f64 / (2. * scale);
+            let v = v * map.rows() as f64 / (2. * scale);
+            // sampling the 4D noise map
+            map[(row, col)] = noise.get([u.x, u.y, v.x, v.y])
+        }
+    }
+
+    if let Some(noise_map) = noise_map {
+        img_from_map(&map)
+            .save(noise_map)
+            .expect("Cannot save map image")
+    }
+
+    let illumination = Illumination::new(SunSetup {
+        day_lenght,
+        latitude,
+        solar_constant,
+    })
+    .into_ok();
+
+    match command {
+        Command::Frame {
+            time,
+            illuminate_map,
+        } => {
+            let illuminated = illumination.illuminate(&map, time);
+            img_from_illumination(&illuminated, illumination.solar_constant)
+                .save(illuminate_map)
+                .expect("Cannot save map image")
+        }
+        Command::Video {
+            framerate,
+            lenght,
+            illuminate_video,
+        } => {
+            let frames = (framerate as f64 * lenght) as u64;
+
+            let mut ffmpeg = std::process::Command::new("ffmpeg")
+                .arg("-y")
+                .args(["-f", "image2pipe"])
+                .args(["-c:v", "bmp"])
+                .arg("-framerate")
+                .arg(format!("{}", framerate))
+                .args(["-i", "-"])
+                .args(["-c:v", "libx264"])
+                .args(["-pix_fmt", "yuv420p"])
+                .arg("-r")
+                .arg(format!("{}", framerate))
+                .arg(illuminate_video)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .expect("Cannot launch ffmpeg");
+            let mut frame_buffer = Vec::<u8>::new();
+
+            for f in 0..frames {
+                let time = Time::ZERO - illumination.day_lenght * 0.5
+                    + (illumination.day_lenght * f) / frames;
+
+                let illuminated = illumination.illuminate(&map, time);
+
+                // sending to ffmpeg
+                frame_buffer.clear();
+                img_from_illumination(&illuminated, solar_constant)
+                    .write_to(&mut Cursor::new(&mut frame_buffer), image::ImageFormat::Bmp)
+                    .expect("Cannot save frame as image");
+                ffmpeg
+                    .stdin
+                    .as_mut()
+                    .unwrap()
+                    .write_all(&frame_buffer)
+                    .expect("Cannot write frame to ffmpeg pipe");
+            }
+
+            ffmpeg
+                .wait()
+                .unwrap()
+                .exit_ok()
+                .expect("Ffmpeg closed with error.")
+        }
+    }
+}
+
+/// Generate an image from a grid of elevations
+fn img_from_map(map: &Grid<f64>) -> GrayImage {
+    let min = map.iter().copied().reduce(f64::min).unwrap();
+    let max = map.iter().copied().reduce(f64::max).unwrap();
+    GrayImage::from_fn(map.cols() as u32, map.rows() as u32, |col, row| {
+        let value = ((map[(row as usize, col as usize)] - min) / (max - min) * 255.) as u8;
+        Luma([value])
+    })
+}
+
+/// Generate an image from a grid of illumintions
+fn img_from_illumination(map: &Grid<f64>, solar_constant: f64) -> GrayImage {
+    GrayImage::from_fn(map.cols() as u32, map.rows() as u32, |col, row| {
+        let value = clamp(
+            map[(row as usize, col as usize)] / solar_constant * 255.,
+            0.,
+            256.,
+        ) as u8;
+        Luma([value])
+    })
+}

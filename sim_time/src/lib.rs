@@ -23,6 +23,10 @@ impl Duration {
 
     pub const MIN: Duration = Duration(TimeDelta::ZERO);
     pub const MAX: Duration = Duration(TimeDelta::MAX);
+
+    pub fn as_time_delta(self) -> TimeDelta {
+        self.into()
+    }
 }
 
 #[derive(Debug, Clone, Copy, Error)]
@@ -169,6 +173,10 @@ impl TimeDelta {
 
     pub fn abs(self) -> Duration {
         Duration(Self(self.0.abs()))
+    }
+
+    pub fn rem_euclid(self, rhs: TimeDelta) -> Duration {
+        Duration(Self(self.0.rem_euclid(rhs.0)))
     }
 }
 
@@ -444,6 +452,12 @@ pub mod humanized {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     /// Wrap a type and provide helper functions to parse human representations
     pub struct Humanized<T>(T);
+
+    impl<T> Humanized<T> {
+        pub fn inner(self) -> T {
+            self.0
+        }
+    }
 
     macro_rules! humanized_from_into {
         ($t:ty) => {
