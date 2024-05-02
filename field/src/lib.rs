@@ -1,6 +1,5 @@
 use std::{
     f64,
-    iter::{once, repeat},
     ops::{Add, Mul},
 };
 
@@ -25,6 +24,10 @@ pub struct Field<T> {
 
     lower_barycentric_coords_gradient: Matrix2x3<f64>,
     upper_barycentric_coords_gradient: Matrix2x3<f64>,
+
+    res: f64,
+    tile_x: f64,
+    tile_y: f64,
 }
 
 impl<T> Field<T> {
@@ -76,6 +79,9 @@ impl<T> Field<T> {
             to_square_coords,
             lower_barycentric_coords_gradient,
             upper_barycentric_coords_gradient,
+            res,
+            tile_x,
+            tile_y,
         } = self;
 
         let (rows, cols) = data.size();
@@ -100,6 +106,9 @@ impl<T> Field<T> {
             to_square_coords,
             lower_barycentric_coords_gradient,
             upper_barycentric_coords_gradient,
+            res,
+            tile_x,
+            tile_y,
         }
     }
 
@@ -110,6 +119,9 @@ impl<T> Field<T> {
             to_square_coords,
             lower_barycentric_coords_gradient,
             upper_barycentric_coords_gradient,
+            res,
+            tile_x,
+            tile_y,
         } = self;
 
         let cols = data.cols();
@@ -121,6 +133,9 @@ impl<T> Field<T> {
             to_square_coords,
             lower_barycentric_coords_gradient,
             upper_barycentric_coords_gradient,
+            res,
+            tile_x,
+            tile_y,
         }
     }
 
@@ -145,6 +160,18 @@ impl<T> Field<T> {
             TrigType::Upper => &self.upper_barycentric_coords_gradient,
             TrigType::Lower => &self.lower_barycentric_coords_gradient,
         }
+    }
+
+    pub fn res(&self) -> f64 {
+        self.res
+    }
+
+    pub fn tile_x(&self) -> f64 {
+        self.tile_x
+    }
+
+    pub fn tile_y(&self) -> f64 {
+        self.tile_y
     }
 }
 
@@ -219,6 +246,10 @@ where
 
             lower_barycentric_coords_gradient,
             upper_barycentric_coords_gradient,
+
+            res,
+            tile_x,
+            tile_y,
         }
     }
 }

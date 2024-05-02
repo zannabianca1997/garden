@@ -6,16 +6,17 @@ use std::{
     ffi::OsString,
     hash::{DefaultHasher, Hash, Hasher},
     io::{Cursor, Write},
+    num::NonZeroUsize,
     path::PathBuf,
     process::Stdio,
 };
 
 use clap::{Parser, Subcommand};
-use grid::Grid;
+use field::Field;
 use illumination::{Illumination, SunSetup};
 use image::{GrayImage, Luma};
-use nalgebra::{clamp, vector};
-use noise::{NoiseFn, Perlin, Simplex};
+use nalgebra::{point, vector};
+use noise::{NoiseFn, Simplex};
 use rand::{thread_rng, Rng};
 use sim_time::{humanized::Humanized, Duration, Time};
 
@@ -26,14 +27,17 @@ struct Args {
     /// Seed for the noise
     seed: Option<OsString>,
 
-    #[clap(long, short, default_value = "128")]
+    #[clap(long, short = 'y', default_value = "128")]
     /// Vertical size of the map
-    rows: u32,
-    #[clap(long, short, default_value = "128")]
+    tile_y: f64,
+    #[clap(long, short = 'x', default_value = "128")]
     /// Orizontal size of the map
-    cols: u32,
+    tile_x: f64,
+    #[clap(long, short, default_value = "1")]
+    /// Resolution of the map
+    res: f64,
 
-    #[clap(long, short, default_value = "10")]
+    #[clap(long, short, default_value = "3")]
     /// Scale of the features in the map
     scale: f64,
 
@@ -46,10 +50,17 @@ struct Args {
     #[clap(long, default_value = "615.15")]
     /// Solar constant, in W/m^2
     solar_constant: f64,
+    #[clap(long, default_value = "10")]
+    /// Ambient illumination, in percentage of total energy flux
+    ambient: f64,
 
     #[clap(long, short)]
     /// Output file for the noise map
     noise_map: Option<PathBuf>,
+
+    #[clap(long, default_value = "2")]
+    /// Resolution of the output, in dots for unit
+    dpu: NonZeroUsize,
 
     #[clap(subcommand)]
     command: Command,
@@ -84,13 +95,16 @@ enum Command {
 fn main() {
     let Args {
         seed,
-        rows,
-        cols,
+        tile_y,
+        tile_x,
+        res,
         scale,
         day_lenght,
         latitude,
         solar_constant,
         noise_map,
+        ambient,
+        dpu,
         command,
     } = Args::parse();
 
@@ -101,28 +115,28 @@ fn main() {
     } else {
         thread_rng().gen()
     };
-    let noise = noise::Multiply::new(Simplex::new(seed), noise::Constant::new(scale));
+    let noise = noise::ScalePoint::new(noise::Multiply::new(
+        Simplex::new(seed),
+        noise::Constant::new(scale),
+    ))
+    .set_scale(scale);
 
-    let mut map = Grid::new(rows as usize, cols as usize);
-
-    for row in 0..map.rows() {
-        for col in 0..map.cols() {
-            // conversion to normalized coordinates
-            let u = col as f64 / map.cols() as f64;
-            let v = (map.rows() - 1 - row) as f64 / map.rows() as f64;
-            // conversion to toroidal 4d coordinates
-            let u = vector![(u * 2. * PI).cos(), (u * 2. * PI).sin()];
-            let v = vector![(v * 2. * PI).cos(), (v * 2. * PI).sin()];
-            // zooming of the torus to make features the right size
-            let u = u * map.cols() as f64 / (2. * scale);
-            let v = v * map.rows() as f64 / (2. * scale);
-            // sampling the 4D noise map
-            map[(row, col)] = noise.get([u.x, u.y, v.x, v.y])
-        }
-    }
+    let map = Field::new_from_fun(tile_x, tile_y, res, |pos| {
+        // conversion to normalized coordinates
+        let u = pos.x / tile_x;
+        let v = pos.y / tile_y;
+        // conversion to toroidal 4d coordinates
+        let u = vector![(u * 2. * PI).cos(), (u * 2. * PI).sin()];
+        let v = vector![(v * 2. * PI).cos(), (v * 2. * PI).sin()];
+        // zooming of the torus to make features the right size
+        let u = u / 2.;
+        let v = v / 2.;
+        // sampling the 4D noise map
+        noise.get([u.x, u.y, v.x, v.y])
+    });
 
     if let Some(noise_map) = noise_map {
-        img_from_map(&map)
+        img_from_map(&map, dpu)
             .save(noise_map)
             .expect("Cannot save map image")
     }
@@ -131,6 +145,7 @@ fn main() {
         day_lenght,
         latitude,
         solar_constant,
+        ambient,
     })
     .into_ok();
 
@@ -140,7 +155,7 @@ fn main() {
             illuminate_map,
         } => {
             let illuminated = illumination.illuminate(&map, time);
-            img_from_illumination(&illuminated, illumination.solar_constant)
+            img_from_illumination(&illuminated, illumination.solar_constant, dpu)
                 .save(illuminate_map)
                 .expect("Cannot save map image")
         }
@@ -178,7 +193,7 @@ fn main() {
 
                 // sending to ffmpeg
                 frame_buffer.clear();
-                img_from_illumination(&illuminated, solar_constant)
+                img_from_illumination(&illuminated, solar_constant, dpu)
                     .write_to(&mut Cursor::new(&mut frame_buffer), image::ImageFormat::Bmp)
                     .expect("Cannot save frame as image");
                 ffmpeg
@@ -199,23 +214,36 @@ fn main() {
 }
 
 /// Generate an image from a grid of elevations
-fn img_from_map(map: &Grid<f64>) -> GrayImage {
-    let min = map.iter().copied().reduce(f64::min).unwrap();
-    let max = map.iter().copied().reduce(f64::max).unwrap();
-    GrayImage::from_fn(map.cols() as u32, map.rows() as u32, |col, row| {
-        let value = ((map[(row as usize, col as usize)] - min) / (max - min) * 255.) as u8;
+fn img_from_map(map: &Field<f64>, dpu: NonZeroUsize) -> GrayImage {
+    let min = map.min_by(f64::total_cmp);
+    let max = map.max_by(f64::total_cmp);
+
+    let res_x = (map.tile_x() * dpu.get() as f64) as u32;
+    let res_y = (map.tile_y() * dpu.get() as f64) as u32;
+
+    GrayImage::from_fn(res_x, res_y, |x, y| {
+        let x = map.tile_x() * (x as f64 / res_x as f64);
+        let y = map.tile_y() * (1. - y as f64 / res_y as f64);
+
+        let value = (u8::MAX as f64 * (map.value(point![x, y]) - min) / (max - min)) as u8;
         Luma([value])
     })
 }
 
 /// Generate an image from a grid of illumintions
-fn img_from_illumination(map: &Grid<f64>, solar_constant: f64) -> GrayImage {
-    GrayImage::from_fn(map.cols() as u32, map.rows() as u32, |col, row| {
-        let value = clamp(
-            map[(row as usize, col as usize)] / solar_constant * 255.,
-            0.,
-            256.,
-        ) as u8;
+fn img_from_illumination(
+    illumination: &Field<f64>,
+    solar_constant: f64,
+    dpu: NonZeroUsize,
+) -> GrayImage {
+    let res_x = (illumination.tile_x() * dpu.get() as f64) as u32;
+    let res_y = (illumination.tile_y() * dpu.get() as f64) as u32;
+
+    GrayImage::from_fn(res_x, res_y, |x, y| {
+        let x = illumination.tile_x() * (x as f64 / res_x as f64);
+        let y = illumination.tile_y() * (1. - y as f64 / res_y as f64);
+
+        let value = (u8::MAX as f64 * (illumination.value(point![x, y]) / solar_constant)) as u8;
         Luma([value])
     })
 }

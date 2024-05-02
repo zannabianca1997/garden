@@ -4,11 +4,10 @@
 use std::f64::consts::PI;
 
 use field::Field;
-use nalgebra::{point, Point3, Unit, UnitVector3, Vector3};
+use nalgebra::{point, Unit, UnitVector3, Vector3};
 use serde_with::serde_as;
 use sim_time::{Duration, Time};
 
-use grid::Grid;
 use serde::{Deserialize, Serialize};
 
 #[serde_as]
@@ -22,6 +21,8 @@ pub struct SunSetup {
     pub latitude: f64,
     /// Solar constant, in W/m^2
     pub solar_constant: f64,
+    /// Ambient illumination, in percentage of total energy flux
+    pub ambient: f64,
 }
 
 impl Default for SunSetup {
@@ -30,6 +31,7 @@ impl Default for SunSetup {
             day_lenght: Duration::DAY,
             latitude: 45.,
             solar_constant: 615.15,
+            ambient: 10.,
         }
     }
 }
@@ -44,6 +46,8 @@ pub struct Illumination {
     pub sunrise: UnitVector3<f64>,
     /// Solar constant, in W/m^2
     pub solar_constant: f64,
+    /// Ambient illumination [0-1]
+    pub ambient: f64,
 }
 
 impl Illumination {
@@ -52,6 +56,7 @@ impl Illumination {
             day_lenght,
             latitude,
             solar_constant,
+            ambient,
         }: SunSetup,
     ) -> Result<Self, !> {
         let latitude = latitude * (PI / 180.);
@@ -62,6 +67,7 @@ impl Illumination {
             ),
             sunrise: Vector3::x_axis(),
             solar_constant,
+            ambient: ambient / 100.,
         })
     }
 
@@ -77,9 +83,37 @@ impl Illumination {
             sun_theta.sin() * self.sunrise.into_inner()
                 + sun_theta.cos() * self.solar_noon.into_inner(),
         );
+
+        if sun_pos.z < 0. {
+            // sun is underground
+            return map.clone().map(|_| 0.);
+        }
+
         // energy vector
         let energy_flux = self.solar_constant * sun_pos.into_inner();
 
-        todo!()
+        let ambient = energy_flux.z * self.ambient;
+        let energy_flux = energy_flux * (1. - self.ambient);
+
+        let caster = map.raycaster(Default::default());
+
+        map.clone().map_with_coords(|pos, height| {
+            // check if the sun is visible
+            let direct_sun_energy = if caster
+                .cast(
+                    point![pos.x, pos.y, height] + sun_pos.into_inner() * map.res() * 0.001,
+                    sun_pos.into_inner(),
+                )
+                .is_none()
+            {
+                // directly illuminated by the sun
+                map.normal(pos).dot(&energy_flux)
+            } else {
+                // sun is covered
+                0.
+            };
+
+            ambient + direct_sun_energy
+        })
     }
 }

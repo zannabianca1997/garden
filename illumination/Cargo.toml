@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-grid = { version = "0.13.0", features = ["serde"] }
 nalgebra = { version = "0.32.5", features = ["serde-serialize"] }
 serde = { version = "1.0.197", features = ["derive"] }
 serde_with = "3.7.0"

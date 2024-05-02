@@ -600,7 +600,6 @@ dependencies = [
  "ciborium",
  "clap",
  "field",
- "grid",
  "image",
  "indent_write",
  "nalgebra",
